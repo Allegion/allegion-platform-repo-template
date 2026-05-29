@@ -20,25 +20,12 @@ name: 'Setup Repository'
 
 on:
   workflow_dispatch:
-    inputs:
-      azureClientId:
-        description: 'Azure App Registration Client ID (AZURE_CLIENT_ID). Leave blank to set later in GitHub UI.'
-        required: false
-        default: ''
-      azureTenantId:
-        description: 'Azure Tenant ID (AZURE_TENANT_ID). Leave blank to set later in GitHub UI.'
-        required: false
-        default: ''
-      azureSubscriptionId:
-        description: 'Azure Subscription ID (AZURE_SUBSCRIPTION_ID). Leave blank to set later in GitHub UI.'
-        required: false
-        default: ''
 
 permissions:
   actions: write         # required for workflow operations
-  variables: write       # required to create/update repo variables via gh CLI
-  # Note: creating environments via gh api requires the triggering user to be a repo admin.
-  # This cannot be granted via workflow permissions — it is enforced by GitHub at the API level.
+  # Note: GITHUB_TOKEN cannot set repo variables (requires a PAT with repo scope).
+  # Use scripts/setup-repo-variables.ps1 locally to set AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID.
+  # Creating environments via gh api requires the triggering user to be a repo admin.
 
 jobs:
   setup:
@@ -50,28 +37,11 @@ jobs:
 
     steps:
       # ============================================================
-      # 1. Set required repo-level variables
-      # ============================================================
-      - name: Set AZURE_CLIENT_ID
-        run: |
-          VALUE="${{ inputs.azureClientId }}"
-          gh variable set AZURE_CLIENT_ID --repo "$REPO" --body "$VALUE"
-          echo "AZURE_CLIENT_ID set to: ${VALUE:-(blank — update in GitHub Settings → Variables)}"
-
-      - name: Set AZURE_TENANT_ID
-        run: |
-          VALUE="${{ inputs.azureTenantId }}"
-          gh variable set AZURE_TENANT_ID --repo "$REPO" --body "$VALUE"
-          echo "AZURE_TENANT_ID set to: ${VALUE:-(blank — update in GitHub Settings → Variables)}"
-
-      - name: Set AZURE_SUBSCRIPTION_ID
-        run: |
-          VALUE="${{ inputs.azureSubscriptionId }}"
-          gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPO" --body "$VALUE"
-          echo "AZURE_SUBSCRIPTION_ID set to: ${VALUE:-(blank — update in GitHub Settings → Variables)}"
-
-      # ============================================================
-      # 2. Create standard GitHub environments
+      # 1. Create standard GitHub environments
+      # NOTE: Repo variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
+      #       must be set using scripts/setup-repo-variables.ps1 or manually in
+      #       Settings → Secrets and variables → Actions → Variables.
+      #       GITHUB_TOKEN cannot set repo variables — a PAT with repo scope is required.
       #    -plan  environments are unprotected (OIDC login, no approval gate)
       #    non-plan environments are protected (require reviewer approval)
       #
@@ -105,17 +75,18 @@ jobs:
         run: |
           echo "## Repository Setup Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Variables created" >> $GITHUB_STEP_SUMMARY
-          echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| AZURE_CLIENT_ID | ${{ inputs.azureClientId != '' && inputs.azureClientId || '*(blank — set in Settings → Variables)*' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AZURE_TENANT_ID | ${{ inputs.azureTenantId != '' && inputs.azureTenantId || '*(blank — set in Settings → Variables)*' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AZURE_SUBSCRIPTION_ID | ${{ inputs.azureSubscriptionId != '' && inputs.azureSubscriptionId || '*(blank — set in Settings → Variables)*' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Environments created" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | Type |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| dev-plan | Unprotected (OIDC / no approval) |" >> $GITHUB_STEP_SUMMARY
           echo "| dev | Protected (requires reviewer approval) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Next: update any blank variables in **Settings → Secrets and variables → Actions → Variables**" >> $GITHUB_STEP_SUMMARY
+          echo "### Next steps" >> $GITHUB_STEP_SUMMARY
+          echo "Run **scripts/setup-repo-variables.ps1** locally to set required repo variables:" >> $GITHUB_STEP_SUMMARY
+          echo "- AZURE_CLIENT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- AZURE_TENANT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- AZURE_SUBSCRIPTION_ID" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Add secrets in **Settings → Secrets and variables → Actions → Secrets**:" >> $GITHUB_STEP_SUMMARY
+          echo "- BLACKDUCK_API_TOKEN" >> $GITHUB_STEP_SUMMARY
+          echo "- SONARQUBE_TOKEN" >> $GITHUB_STEP_SUMMARY
