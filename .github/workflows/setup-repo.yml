@@ -1,92 +1,49 @@
 name: 'Setup Repository'
 # ============================================================
-# Run this ONCE after creating a repo from the Allegion template
-# (or after migrating a repo from ADO to GitHub).
+# Run this ONCE after creating a repo from the Allegion template.
 #
-# HOW TO RUN:
-#   GitHub UI → Actions → "Setup Repository" → Run workflow
-#   Fill in the three Azure values (or leave blank and update later
-#   in Settings → Secrets and variables → Actions → Variables).
+# HOW TO USE:
+#   This workflow just prints a setup checklist as a job summary.
+#   The actual setup (variables + environments) is done by running
+#   scripts/setup-repo-variables.ps1 locally:
 #
-# WHAT IT DOES:
-#   1. Creates the three required repo-level variables
-#      (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
-#   2. Creates the standard GitHub environments used by the shared workflows
-#      (dev-plan, dev — extend the list for test/prod as needed)
+#     .\scripts\setup-repo-variables.ps1 -Repo "Allegion/<your-repo-name>"
 #
-# PERMISSIONS REQUIRED:
-#   Must be run by a repo admin so GITHUB_TOKEN has administration write access.
+# WHY NOT AUTOMATED HERE:
+#   GITHUB_TOKEN cannot set repo variables or create environments in
+#   org repos. A PAT with repo scope (gh auth login) is required,
+#   which the local script uses via the GitHub CLI.
 # ============================================================
 
 on:
   workflow_dispatch:
 
 permissions:
-  actions: write         # required for workflow operations
-  # Note: GITHUB_TOKEN cannot set repo variables (requires a PAT with repo scope).
-  # Use scripts/setup-repo-variables.ps1 locally to set AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID.
-  # Creating environments via gh api requires the triggering user to be a repo admin.
+  contents: read
 
 jobs:
-  setup:
-    name: Setup Repo Variables & Environments
+  checklist:
+    name: Setup Checklist
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
 
     steps:
-      # ============================================================
-      # 1. Create standard GitHub environments
-      # NOTE: Repo variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
-      #       must be set using scripts/setup-repo-variables.ps1 or manually in
-      #       Settings → Secrets and variables → Actions → Variables.
-      #       GITHUB_TOKEN cannot set repo variables — a PAT with repo scope is required.
-      #    -plan  environments are unprotected (OIDC login, no approval gate)
-      #    non-plan environments are protected (require reviewer approval)
-      #
-      # Extend this list to match your release environments, e.g.:
-      #   test-plan / test
-      #   prod-plan / prod
-      # ============================================================
-      - name: Create environments
+      - name: Print setup checklist
         run: |
-          ENVS_UNPROTECTED="dev-plan"
-          ENVS_PROTECTED="dev"
-
-          for ENV in $ENVS_UNPROTECTED; do
-            echo "Creating unprotected environment: $ENV"
-            gh api --method PUT "repos/$REPO/environments/$ENV" \
-              --field prevent_self_review=false \
-              --silent || echo "  Warning: could not create $ENV — create it manually in Settings > Environments"
-          done
-
-          for ENV in $ENVS_PROTECTED; do
-            echo "Creating protected environment: $ENV"
-            gh api --method PUT "repos/$REPO/environments/$ENV" \
-              --field prevent_self_review=false \
-              --silent || echo "  Warning: could not create $ENV — create it manually in Settings > Environments"
-          done
-
-      # ============================================================
-      # 3. Print summary
-      # ============================================================
-      - name: Summary
-        run: |
-          echo "## Repository Setup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Repository Setup Checklist" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Environments created" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Type |" >> $GITHUB_STEP_SUMMARY
+          echo "Run the following PowerShell script **locally** to complete setup:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```powershell' >> $GITHUB_STEP_SUMMARY
+          echo ".\scripts\setup-repo-variables.ps1 -Repo \"${{ github.repository }}\"" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The script will:" >> $GITHUB_STEP_SUMMARY
+          echo "- Prompt for AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID and set them as repo variables" >> $GITHUB_STEP_SUMMARY
+          echo "- Create the standard GitHub environments: dev-plan, dev" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Manual steps after running the script" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Where |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| dev-plan | Unprotected (OIDC / no approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "| dev | Protected (requires reviewer approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next steps" >> $GITHUB_STEP_SUMMARY
-          echo "Run **scripts/setup-repo-variables.ps1** locally to set required repo variables:" >> $GITHUB_STEP_SUMMARY
-          echo "- AZURE_CLIENT_ID" >> $GITHUB_STEP_SUMMARY
-          echo "- AZURE_TENANT_ID" >> $GITHUB_STEP_SUMMARY
-          echo "- AZURE_SUBSCRIPTION_ID" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Add secrets in **Settings → Secrets and variables → Actions → Secrets**:" >> $GITHUB_STEP_SUMMARY
-          echo "- BLACKDUCK_API_TOKEN" >> $GITHUB_STEP_SUMMARY
-          echo "- SONARQUBE_TOKEN" >> $GITHUB_STEP_SUMMARY
+          echo "| Add BLACKDUCK_API_TOKEN secret | Settings > Secrets and variables > Actions > Secrets |" >> $GITHUB_STEP_SUMMARY
+          echo "| Add SONARQUBE_TOKEN secret | Settings > Secrets and variables > Actions > Secrets |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fill in TODO items in dotnet-ci-cd.yml or angular-ci-cd.yml | Edit the workflow file |" >> $GITHUB_STEP_SUMMARY

@@ -37,8 +37,18 @@ function Set-RepoVariable {
     }
 }
 
+function New-Environment {
+    param([string]$Repo, [string]$Name)
+    gh api --method PUT "repos/$Repo/environments/$Name" --silent 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  OK environment '$Name' created" -ForegroundColor Green
+    } else {
+        Write-Host "  FAILED to create '$Name' - create it manually in Settings > Environments" -ForegroundColor Red
+    }
+}
+
 Write-Host ""
-Write-Host "Setting up repo variables for: $Repo" -ForegroundColor Cyan
+Write-Host "Setting up repo: $Repo" -ForegroundColor Cyan
 Write-Host "------------------------------------------"
 
 if (-not $AzureClientId) {
@@ -58,12 +68,16 @@ Set-RepoVariable -Repo $Repo -Name "AZURE_TENANT_ID"       -Value $AzureTenantId
 Set-RepoVariable -Repo $Repo -Name "AZURE_SUBSCRIPTION_ID" -Value $AzureSubscriptionId
 
 Write-Host ""
+Write-Host "Creating GitHub environments..." -ForegroundColor Cyan
+New-Environment -Repo $Repo -Name "dev-plan"
+New-Environment -Repo $Repo -Name "dev"
+
+Write-Host ""
 Write-Host "Done." -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Add secrets in GitHub UI: Settings > Secrets and variables > Actions > Secrets"
 Write-Host "       - BLACKDUCK_API_TOKEN"
 Write-Host "       - SONARQUBE_TOKEN"
-Write-Host "  2. Run the 'Setup Repository' workflow in Actions tab to create GitHub environments"
-Write-Host "  3. Update the TODO items in .github/workflows/dotnet-ci-cd.yml (or angular-ci-cd.yml)"
+Write-Host "  2. Fill in the TODO items in .github/workflows/dotnet-ci-cd.yml (or angular-ci-cd.yml)"
 Write-Host ""
