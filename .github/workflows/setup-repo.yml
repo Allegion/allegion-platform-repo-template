@@ -35,7 +35,8 @@ on:
         default: ''
 
 permissions:
-  actions: write         # required to create/update repo variables via gh CLI
+  actions: write         # required for workflow operations
+  variables: write       # required to create/update repo variables via gh CLI
   # Note: creating environments via gh api requires the triggering user to be a repo admin.
   # This cannot be granted via workflow permissions — it is enforced by GitHub at the API level.
 
