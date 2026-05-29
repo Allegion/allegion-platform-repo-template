@@ -1,20 +1,17 @@
 # ============================================================
-# .NET CI/CD Caller Workflow — Allegion Platform Template
+# .NET CI/CD Caller Workflow ? Allegion Platform Template
 # ============================================================
 # SETUP CHECKLIST (complete before first PR):
-#   1. Run scripts/setup-repo-variables.ps1 to create repo variables
-#   2. Fill in every TODO below
-#   3. Add GitHub environments: <env>-plan (unprotected) and <env> (protected)
+#   1. The setup-repo.yml workflow has already created your environments
+#      and placeholder variables. Fill in the real values:
+#      - AZURE_TENANT_ID        : Settings > Variables (repo level)
+#      - AZURE_CLIENT_ID        : Settings > Environments > <env> > Variables
+#      - AZURE_SUBSCRIPTION_ID  : Settings > Environments > <env> > Variables
+#   2. Add secrets (cannot be automated):
+#      - SONARQUBE_TOKEN        : Settings > Secrets > Actions
+#      - BLACKDUCK_API_TOKEN    : Should already be an org secret
+#   3. Fill in every TODO below
 #   4. Delete this comment block when done
-#
-# Repo variables required (set via setup script or GitHub UI):
-#   vars.AZURE_CLIENT_ID       — App registration client ID
-#   vars.AZURE_TENANT_ID       — Azure AD tenant ID
-#   vars.AZURE_SUBSCRIPTION_ID — Azure subscription ID (Terraform only)
-#
-# Secrets required:
-#   secrets.BLACKDUCK_API_TOKEN  — BlackDuck API token
-#   secrets.SONARQUBE_TOKEN      — SonarQube token
 # ============================================================
 
 name: CI/CD - .NET          # TODO: rename to your project name
@@ -34,21 +31,21 @@ jobs:
     uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/dotnet-reusable-ci.yml@main
     with:
       # --- .NET project -----------------------------------------
-      dotnetVersion: '8.x'                   # TODO: match your target framework
-      dotnetProjects: 'MyApp.sln'            # TODO: solution or project file
+      dotnetVersion: '8.x'                    # TODO: match your target framework
+      dotnetProjects: 'MyApp.sln'             # TODO: solution or project file
       dotnetPublishProjects: '**/*Api.csproj' # TODO: project(s) to publish
-      dotnetWorkingDirectory: '.'            # TODO: subfolder if solution is not at root
+      dotnetWorkingDirectory: '.'             # TODO: subfolder if solution is not at root
       dotnetBuildConfig: 'Release'
       dotnetZipAfterPublish: true
       dotnetArtifactName: 'drop'
 
       # --- Azure auth -------------------------------------------
-      azureOrganization: 'allegionit'        # TODO: update if different org
+      azureOrganization: 'allegionit'         # TODO: update if different org
       azureTenantId: ${{ vars.AZURE_TENANT_ID }}
       azureClientId: ${{ vars.AZURE_CLIENT_ID }}
 
       # --- SonarQube --------------------------------------------
-      # TODO: create project in SonarQube and set these keys
+      # TODO: create project in SonarQube and set these values
       sonarqubeProjectKey: 'github.Allegion.<your-repo-name>'
       sonarqubeProjectName: 'github.Allegion.<your-repo-name>'
       sonarqubeExclusions: '**/bin/**,**/obj/**,**/*.Tests/**'
@@ -59,7 +56,6 @@ jobs:
       blackduckProjectName: '<your-blackduck-project-name>'
       blackduckVersionName: 'main-ci-dotnet'
 
-      # --- Runner -----------------------------------------------
       runner: ubuntu-latest
 
     secrets:
@@ -67,22 +63,19 @@ jobs:
       SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
 
   # ============================================================
-  # DEPLOY — DEV
-  # Provision infra (Terraform) + deploy app
+  # DEPLOY ? DEV
   # ============================================================
   Deploy-Dev:
     needs: [ Build ]
     uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/deploy-to-environments.yml@main
     with:
       artifactName: drop
-      environment: dev              # TODO: must match a GitHub environment name
-      planEnvironment: dev-plan     # TODO: unprotected env for Terraform plan
+      environment: dev
+      planEnvironment: dev-plan
 
-      # --- App type: uncomment ONE block below ------------------
-
-      # Web API (Azure App Service):
+      # --- App type: uncomment ONE line below -------------------
       deployAPI: true
-      # deployFunctionApp: true     # Function App — swap deployAPI for this
+      # deployFunctionApp: true
 
       # --- Terraform --------------------------------------------
       deployTerraform: true
@@ -91,11 +84,9 @@ jobs:
       terraformBackendConfigPath: 'devops_script/terraform/backendConfigs/dev-backendConfig.yml'
       terraformEnableConcurrency: true
 
-      # --- Variables / tokenization ----------------------------
       variableYamlPath: 'devops_script/variables/dev-vars.yml' # TODO: path or remove
 
-      # --- Wiz IaC scan (optional) -----------------------------
-      wizEnabled: false             # TODO: set true when Wiz is configured
+      wizEnabled: false
       wizPolicy: ''
       wizScanTags: 'cicd=gha,env=dev'
       wizFailOnPolicyHit: false
@@ -104,45 +95,61 @@ jobs:
     secrets: inherit
 
   # ============================================================
-  # DEPLOY APPS — DEV (matrix: Function Apps / Web APIs / Frontends)
-  # Add or remove entries from the matrix as needed.
+  # DEPLOY ? TEST
   # ============================================================
-  Deploy-Apps-Dev:
-    name: Deploy ${{ matrix.deploy.type }} - ${{ matrix.deploy.name }}
+  Deploy-Test:
     needs: [ Deploy-Dev ]
-    runs-on: ${{ matrix.deploy.runner }}
-    environment: dev
-    permissions:
-      id-token: write
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        deploy:
-          # TODO: replace with your actual app names / types
-          # Types: functionapp | webapp | frontend
-          - type: webapp
-            name: my-dev-api           # TODO: Azure App Service name
-            package_glob: '*.zip'
-            runner: ubuntu-latest
-            variable_yaml: 'devops_script/variables/dev-vars.yml'
-            appsettings_yaml: ''
-            enable_tokenization: false
-            tokenization_files: ''
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/deploy-to-environments.yml@main
+    with:
+      artifactName: drop
+      environment: test
+      planEnvironment: test-plan
 
-      - name: Deploy ${{ matrix.deploy.type }} - ${{ matrix.deploy.name }}
-        uses: Allegion/allegion-platform-yaml-template-shared/.github/actions/deployments/deploy-app@main
-        with:
-          appType: ${{ matrix.deploy.type }}
-          appName: ${{ matrix.deploy.name }}
-          artifactName: drop
-          packageGlob: ${{ matrix.deploy.package_glob }}
-          variableYamlPath: ${{ matrix.deploy.variable_yaml }}
-          appSettingsYamlPath: ${{ matrix.deploy.appsettings_yaml }}
-          enableTokenization: ${{ matrix.deploy.enable_tokenization }}
-          tokenizationFiles: ${{ matrix.deploy.tokenization_files }}
-          azureClientId: ${{ vars.AZURE_CLIENT_ID }}
-          azureTenantId: ${{ vars.AZURE_TENANT_ID }}
+      deployAPI: true
+      # deployFunctionApp: true
+
+      deployTerraform: true
+      terraformWorkingDirectory: 'devops_script/terraform'
+      tfvarsFile: 'test.tfvars'
+      terraformBackendConfigPath: 'devops_script/terraform/backendConfigs/test-backendConfig.yml'
+      terraformEnableConcurrency: true
+
+      variableYamlPath: 'devops_script/variables/test-vars.yml'
+
+      wizEnabled: false
+      wizPolicy: ''
+      wizScanTags: 'cicd=gha,env=test'
+      wizFailOnPolicyHit: false
+
+      runner: ubuntu-latest
+    secrets: inherit
+
+  # ============================================================
+  # DEPLOY ? PROD
+  # ============================================================
+  Deploy-Prod:
+    needs: [ Deploy-Test ]
+    uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/deploy-to-environments.yml@main
+    with:
+      artifactName: drop
+      environment: prod
+      planEnvironment: prod-plan
+
+      deployAPI: true
+      # deployFunctionApp: true
+
+      deployTerraform: true
+      terraformWorkingDirectory: 'devops_script/terraform'
+      tfvarsFile: 'prod.tfvars'
+      terraformBackendConfigPath: 'devops_script/terraform/backendConfigs/prod-backendConfig.yml'
+      terraformEnableConcurrency: true
+
+      variableYamlPath: 'devops_script/variables/prod-vars.yml'
+
+      wizEnabled: false
+      wizPolicy: ''
+      wizScanTags: 'cicd=gha,env=prod'
+      wizFailOnPolicyHit: false
+
+      runner: ubuntu-latest
+    secrets: inherit
