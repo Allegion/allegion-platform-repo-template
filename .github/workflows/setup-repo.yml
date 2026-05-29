@@ -28,9 +28,19 @@ on:
     paths:
       - '.github/workflows/setup-repo.yml'
   workflow_dispatch:
+    inputs:
+      repoType:
+        description: 'Repo type — determines which CI/CD workflow file to keep'
+        required: true
+        default: 'monorepo'
+        type: choice
+        options:
+          - dotnet
+          - angular
+          - monorepo
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   setup:
@@ -44,6 +54,47 @@ jobs:
         with:
           app-id: ${{ secrets.PLATFORM_SETUP_APP_ID }}
           private-key: ${{ secrets.PLATFORM_SETUP_APP_PRIVATE_KEY }}
+
+      # ============================================================
+      # 0. Remove unused CI/CD workflow files based on repoType
+      #    dotnet   -> delete angular-ci-cd.yml
+      #    angular  -> delete dotnet-ci-cd.yml
+      #    monorepo -> keep both
+      # Only runs on workflow_dispatch (push trigger keeps both files)
+      # ============================================================
+      - name: Remove unused CI/CD workflow files
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          REPO_TYPE: ${{ inputs.repoType }}
+        run: |
+          delete_workflow() {
+            local FILE=$1
+            # Get current SHA of the file (required for deletion)
+            SHA=$(gh api "repos/$REPO/contents/.github/workflows/$FILE" --jq '.sha' 2>/dev/null || true)
+            if [ -n "$SHA" ]; then
+              gh api --method DELETE "repos/$REPO/contents/.github/workflows/$FILE" \
+                -f message="chore: remove unused $FILE (repo type: $REPO_TYPE)" \
+                -f sha="$SHA" --silent \
+                && echo "Deleted $FILE" \
+                || echo "WARNING: could not delete $FILE"
+            else
+              echo "$FILE not found, skipping"
+            fi
+          }
+
+          case "$REPO_TYPE" in
+            dotnet)
+              delete_workflow "angular-ci-cd.yml"
+              ;;
+            angular)
+              delete_workflow "dotnet-ci-cd.yml"
+              ;;
+            monorepo)
+              echo "Monorepo: keeping both dotnet-ci-cd.yml and angular-ci-cd.yml"
+              ;;
+          esac
 
       # ============================================================
       # 1. Repo-level variable - tenant is the same for all environments
@@ -129,4 +180,10 @@ jobs:
           echo "1. Fill in all REPLACE_ME values above" >> $GITHUB_STEP_SUMMARY
           echo "2. Add federated credentials in Azure Portal for each environment" >> $GITHUB_STEP_SUMMARY
           echo "3. Confirm BLACKDUCK_API_TOKEN and SONARQUBE_TOKEN exist as org secrets" >> $GITHUB_STEP_SUMMARY
-          echo "4. Fill in the TODO items in .github/workflows/dotnet-ci-cd.yml or angular-ci-cd.yml" >> $GITHUB_STEP_SUMMARY
+          echo "4. Fill in the TODO items in your CI/CD workflow file:" >> $GITHUB_STEP_SUMMARY
+          case "${{ inputs.repoType }}" in
+            dotnet)  echo "   - \`.github/workflows/dotnet-ci-cd.yml\`" >> $GITHUB_STEP_SUMMARY ;;
+            angular) echo "   - \`.github/workflows/angular-ci-cd.yml\`" >> $GITHUB_STEP_SUMMARY ;;
+            monorepo) echo "   - \`.github/workflows/dotnet-ci-cd.yml\` and \`.github/workflows/angular-ci-cd.yml\`" >> $GITHUB_STEP_SUMMARY ;;
+            *)        echo "   - \`.github/workflows/dotnet-ci-cd.yml\` or \`.github/workflows/angular-ci-cd.yml\`" >> $GITHUB_STEP_SUMMARY ;;
+          esac
