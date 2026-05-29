@@ -28,19 +28,9 @@ on:
     paths:
       - '.github/workflows/setup-repo.yml'
   workflow_dispatch:
-    inputs:
-      repoType:
-        description: 'Repo type — determines which CI/CD workflow file to keep'
-        required: true
-        default: 'monorepo'
-        type: choice
-        options:
-          - dotnet
-          - angular
-          - monorepo
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   setup:
@@ -54,78 +44,6 @@ jobs:
         with:
           app-id: ${{ secrets.PLATFORM_SETUP_APP_ID }}
           private-key: ${{ secrets.PLATFORM_SETUP_APP_PRIVATE_KEY }}
-
-      # ============================================================
-      # 0. Remove unused CI/CD workflow files based on repoType
-      #    dotnet   -> delete angular-ci-cd.yml
-      #    angular  -> delete dotnet-ci-cd.yml
-      #    monorepo -> keep both
-      # Only runs on workflow_dispatch (push trigger keeps both files)
-      # ============================================================
-      - name: Remove unused CI/CD workflow files
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ github.repository }}
-          REPO_TYPE: ${{ inputs.repoType }}
-        run: |
-          delete_workflow() {
-            local FILE=$1
-            local BRANCH="chore/remove-${FILE%.*}-$$"
-
-            # Check file exists
-            SHA=$(gh api "repos/$REPO/contents/.github/workflows/$FILE" --jq '.sha' 2>/dev/null || true)
-            if [ -z "$SHA" ]; then
-              echo "$FILE not found, skipping"
-              return
-            fi
-
-            # Get default branch SHA to base new branch on
-            BASE_SHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')
-
-            # Create a temporary branch
-            gh api --method POST "repos/$REPO/git/refs" \
-              -f ref="refs/heads/$BRANCH" \
-              -f sha="$BASE_SHA" --silent
-            echo "Created branch $BRANCH"
-
-            # Delete the file on that branch ([skip ci] prevents CI workflows from running on this cleanup branch)
-            gh api --method DELETE "repos/$REPO/contents/.github/workflows/$FILE" \
-              -f message="chore: remove unused $FILE (repo type: $REPO_TYPE) [skip ci]" \
-              -f sha="$SHA" \
-              -f branch="$BRANCH"
-            echo "Deleted $FILE on branch $BRANCH"
-
-            # Open PR
-            PR_URL=$(gh pr create \
-              --repo "$REPO" \
-              --base main \
-              --head "$BRANCH" \
-              --title "chore: remove $FILE (repo type: $REPO_TYPE)" \
-              --body "Automated cleanup by setup-repo.yml — repo type is \`$REPO_TYPE\` so \`$FILE\` is not needed.")
-            echo "PR created: $PR_URL"
-
-            # Enable auto-merge on the repo (required before using --auto flag)
-            gh api --method PATCH "repos/$REPO" -f allow_auto_merge=true --silent
-
-            # Enable auto-merge on the PR — it will merge as soon as a reviewer approves
-            gh pr merge "$PR_URL" --squash --auto --delete-branch || true
-            echo "PR_CLEANUP_URL=$PR_URL" >> "$GITHUB_ENV"
-            echo "Auto-merge enabled on PR — will merge once approved"
-            echo "Merged and deleted branch $BRANCH"
-          }
-
-          case "$REPO_TYPE" in
-            dotnet)
-              delete_workflow "angular-ci-cd.yml"
-              ;;
-            angular)
-              delete_workflow "dotnet-ci-cd.yml"
-              ;;
-            monorepo)
-              echo "Monorepo: keeping both dotnet-ci-cd.yml and angular-ci-cd.yml"
-              ;;
-          esac
 
       # ============================================================
       # 1. Repo-level variable - tenant is the same for all environments
@@ -211,7 +129,4 @@ jobs:
           echo "1. Fill in all REPLACE_ME values above" >> $GITHUB_STEP_SUMMARY
           echo "2. Add federated credentials in Azure Portal for each environment" >> $GITHUB_STEP_SUMMARY
           echo "3. Confirm BLACKDUCK_API_TOKEN and SONARQUBE_TOKEN exist as org secrets" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$PR_CLEANUP_URL" ]; then
-            echo "4. **Merge the cleanup PR** to remove the unused CI/CD workflow file: $PR_CLEANUP_URL" >> $GITHUB_STEP_SUMMARY
-            echo "   _(PR has auto-merge enabled — just approve it and it will merge automatically)_" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "4. Fill in TODO items in .github/workflows/dotnet-ci-cd.yml and/or angular-ci-cd.yml" >> $GITHUB_STEP_SUMMARY
