@@ -1,21 +1,18 @@
 # ============================================================
-# Angular / NPM CI/CD Caller Workflow — Allegion Platform Template
+# Angular / NPM CI/CD Caller Workflow ? Allegion Platform Template
 # ============================================================
 # SETUP CHECKLIST (complete before first PR):
-#   1. Run scripts/setup-repo-variables.ps1 to create repo variables
-#   2. Fill in every TODO below
-#   3. Add GitHub environments: <env>-plan (unprotected) and <env> (protected)
+#   1. The setup-repo.yml workflow has already created your environments
+#      and placeholder variables. Fill in the real values:
+#      - AZURE_TENANT_ID        : Settings > Variables (repo level)
+#      - AZURE_CLIENT_ID        : Settings > Environments > <env> > Variables
+#      - AZURE_SUBSCRIPTION_ID  : Settings > Environments > <env> > Variables
+#   2. Add secrets (cannot be automated):
+#      - SONARQUBE_TOKEN        : Settings > Secrets > Actions
+#      - BLACKDUCK_API_TOKEN    : Should already be an org secret
+#      - GH_PACKAGES_PAT        : Should already be an org secret (npm packages)
+#   3. Fill in every TODO below
 #   4. Delete this comment block when done
-#
-# Repo variables required (set via setup script or GitHub UI):
-#   vars.AZURE_CLIENT_ID       — App registration client ID
-#   vars.AZURE_TENANT_ID       — Azure AD tenant ID
-#   vars.AZURE_SUBSCRIPTION_ID — Azure subscription ID (Terraform only)
-#
-# Secrets required:
-#   secrets.GH_PACKAGES_PAT      — GitHub PAT for private npm packages (if needed)
-#   secrets.BLACKDUCK_API_TOKEN  — BlackDuck API token
-#   secrets.SONARQUBE_TOKEN      — SonarQube token
 # ============================================================
 
 name: CI/CD - Angular         # TODO: rename to your project name
@@ -35,8 +32,8 @@ jobs:
     uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/npm-reusable-buildtest.yml@main
     with:
       # --- Node / npm ------------------------------------------
-      npmVersionSpec: '20.x'                # TODO: match your Node version
-      npmWorkingDir: '.'                    # TODO: subfolder if package.json is not at root
+      npmVersionSpec: '20.x'               # TODO: match your Node version
+      npmWorkingDir: '.'                   # TODO: subfolder if package.json is not at root
       npmInstallCommand: 'ci'
       npmBuildCustomCommand: 'build'
       npmTestCustomCommand: 'test -- --watch=false --browsers=ChromeHeadlessNoSandbox --code-coverage'
@@ -46,12 +43,12 @@ jobs:
       npmArtifactDistPath: 'dist/<your-app-name>'  # TODO: Angular output folder
 
       # --- Azure auth -------------------------------------------
-      azureOrganization: 'allegionit'       # TODO: update if different org
+      azureOrganization: 'allegionit'      # TODO: update if different org
       azureTenantId: ${{ vars.AZURE_TENANT_ID }}
       azureClientId: ${{ vars.AZURE_CLIENT_ID }}
 
       # --- SonarQube --------------------------------------------
-      # TODO: create project in SonarQube and set these keys
+      # TODO: create project in SonarQube and set these values
       sonarqubeProjectKey: 'github.Allegion.<your-repo-name>'
       sonarqubeProjectName: 'github.Allegion.<your-repo-name>'
       sonarqubeExclusions: '**/node_modules/**,**/dist/**,**/coverage/**,**/*.spec.ts'
@@ -69,36 +66,96 @@ jobs:
       SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
 
   # ============================================================
-  # DEPLOY — DEV
-  # Provision infra (Terraform) + deploy frontend app
+  # DEPLOY ? DEV
   # ============================================================
   Deploy-Dev:
     needs: [ Build ]
     uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/deploy-to-environments.yml@main
     with:
       artifactName: drop-frontend
-      environment: dev              # TODO: must match a GitHub environment name
-      planEnvironment: dev-plan     # TODO: unprotected env for Terraform plan
+      environment: dev
+      planEnvironment: dev-plan
 
       deployFrontend: true
 
-      # --- Terraform --------------------------------------------
       deployTerraform: true
       terraformWorkingDirectory: 'devops_script/terraform'  # TODO: path to .tf files
       tfvarsFile: 'dev.tfvars'
       terraformBackendConfigPath: 'devops_script/terraform/backendConfigs/dev-backendConfig.yml'
       terraformEnableConcurrency: true
 
-      # --- Variables / tokenization ----------------------------
       variableYamlPath: 'devops_script/variables/dev-vars.yml' # TODO: path or remove
       tokenizationFiles: |
         index.html
         app-config.json
 
-      # --- Wiz IaC scan (optional) -----------------------------
-      wizEnabled: false             # TODO: set true when Wiz is configured
+      wizEnabled: false
       wizPolicy: ''
       wizScanTags: 'cicd=gha,env=dev'
+      wizFailOnPolicyHit: false
+
+      runner: ubuntu-latest
+    secrets: inherit
+
+  # ============================================================
+  # DEPLOY ? TEST
+  # ============================================================
+  Deploy-Test:
+    needs: [ Deploy-Dev ]
+    uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/deploy-to-environments.yml@main
+    with:
+      artifactName: drop-frontend
+      environment: test
+      planEnvironment: test-plan
+
+      deployFrontend: true
+
+      deployTerraform: true
+      terraformWorkingDirectory: 'devops_script/terraform'
+      tfvarsFile: 'test.tfvars'
+      terraformBackendConfigPath: 'devops_script/terraform/backendConfigs/test-backendConfig.yml'
+      terraformEnableConcurrency: true
+
+      variableYamlPath: 'devops_script/variables/test-vars.yml'
+      tokenizationFiles: |
+        index.html
+        app-config.json
+
+      wizEnabled: false
+      wizPolicy: ''
+      wizScanTags: 'cicd=gha,env=test'
+      wizFailOnPolicyHit: false
+
+      runner: ubuntu-latest
+    secrets: inherit
+
+  # ============================================================
+  # DEPLOY ? PROD
+  # ============================================================
+  Deploy-Prod:
+    needs: [ Deploy-Test ]
+    uses: Allegion/allegion-platform-yaml-template-shared/.github/workflows/deploy-to-environments.yml@main
+    with:
+      artifactName: drop-frontend
+      environment: prod
+      planEnvironment: prod-plan
+
+      deployFrontend: true
+
+      deployTerraform: true
+      terraformWorkingDirectory: 'devops_script/terraform'
+      tfvarsFile: 'prod.tfvars'
+      terraformBackendConfigPath: 'devops_script/terraform/backendConfigs/prod-backendConfig.yml'
+      terraformEnableConcurrency: true
+
+      variableYamlPath: 'devops_script/variables/prod-vars.yml'
+      tokenizationFiles: |
+        index.html
+        app-config.json
+
+      wizEnabled: false
+      wizPolicy: ''
+      wizScanTags: 'cicd=gha,env=prod'
       wizFailOnPolicyHit: false
 
       runner: ubuntu-latest
