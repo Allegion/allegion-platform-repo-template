@@ -7,11 +7,19 @@ name: 'Setup Repository'
 #   PLATFORM_SETUP_APP_ID          - GitHub App ID
 #   PLATFORM_SETUP_APP_PRIVATE_KEY - GitHub App private key (.pem)
 #
-# WHAT IT DOES (fully automated, no manual steps):
-#   1. Creates blank repo variables to fill in after:
-#      AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
-#   2. Creates standard GitHub environments:
+# WHAT IT DOES (fully automated):
+#   1. Creates repo-level variable:
+#      AZURE_TENANT_ID  (same across all environments - tenant never changes)
+#   2. Creates 6 standard GitHub environments:
 #      dev-plan, dev, test-plan, test, prod-plan, prod
+#   3. Creates environment-level variables on each environment:
+#      AZURE_CLIENT_ID       (fill in per env - may differ for dev/test/prod)
+#      AZURE_SUBSCRIPTION_ID (fill in per env - typically differs per env)
+#
+# AFTER THIS RUNS - fill in real values:
+#   AZURE_TENANT_ID       : Settings > Variables (repo level)
+#   AZURE_CLIENT_ID       : Settings > Environments > <env> > Variables
+#   AZURE_SUBSCRIPTION_ID : Settings > Environments > <env> > Variables
 # ============================================================
 
 on:
@@ -37,53 +45,88 @@ jobs:
           app-id: ${{ secrets.PLATFORM_SETUP_APP_ID }}
           private-key: ${{ secrets.PLATFORM_SETUP_APP_PRIVATE_KEY }}
 
-      - name: Create repo variables
+      # ============================================================
+      # 1. Repo-level variable - tenant is the same for all environments
+      # ============================================================
+      - name: Create repo variable AZURE_TENANT_ID
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
-          gh variable set AZURE_CLIENT_ID       --repo "$REPO" --body "REPLACE_ME" || true
-          gh variable set AZURE_TENANT_ID       --repo "$REPO" --body "REPLACE_ME" || true
-          gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPO" --body "REPLACE_ME" || true
-          echo "Repo variables created - update values in Settings > Secrets and variables > Actions > Variables"
+          gh variable set AZURE_TENANT_ID --repo "$REPO" --body "REPLACE_ME" || true
+          echo "AZURE_TENANT_ID created as repo variable"
 
-      - name: Create GitHub environments
+      # ============================================================
+      # 2. Create environments + environment-level variables
+      #    CLIENT_ID and SUBSCRIPTION_ID are per-environment because
+      #    teams may use different App Registrations per environment.
+      # ============================================================
+      - name: Create environments and environment variables
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
-          for ENV in dev-plan test-plan prod-plan; do
-            echo "Creating unprotected environment: $ENV"
-            gh api --method PUT "repos/$REPO/environments/$ENV" --silent && echo "  OK" || echo "  WARNING: could not create $ENV"
-          done
-          for ENV in dev test prod; do
-            echo "Creating protected environment: $ENV"
-            gh api --method PUT "repos/$REPO/environments/$ENV" --silent && echo "  OK" || echo "  WARNING: could not create $ENV"
+          set_env_var() {
+            local ENV=$1
+            local VAR=$2
+            gh api --method POST "repos/$REPO/environments/$ENV/variables" \
+              -f name="$VAR" -f value="REPLACE_ME" --silent 2>/dev/null \
+              || gh api --method PATCH "repos/$REPO/environments/$ENV/variables/$VAR" \
+                -f value="REPLACE_ME" --silent 2>/dev/null \
+              && echo "  $VAR set" \
+              || echo "  WARNING: could not set $VAR"
+          }
+
+          for ENV in dev-plan dev test-plan test prod-plan prod; do
+            echo "--- Setting up: $ENV ---"
+            gh api --method PUT "repos/$REPO/environments/$ENV" --silent \
+              && echo "  environment created" \
+              || echo "  WARNING: could not create environment"
+            set_env_var "$ENV" "AZURE_CLIENT_ID"
+            set_env_var "$ENV" "AZURE_SUBSCRIPTION_ID"
           done
 
+      # ============================================================
+      # 3. Summary
+      # ============================================================
       - name: Summary
         run: |
           echo "## Repository Setup Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Variables created (update with real values)" >> $GITHUB_STEP_SUMMARY
-          echo "Go to **Settings > Secrets and variables > Actions > Variables**" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Repo-level variable" >> $GITHUB_STEP_SUMMARY
+          echo "Update at: **Settings > Secrets and variables > Actions > Variables**" >> $GITHUB_STEP_SUMMARY
           echo "| Variable | Description |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| AZURE_CLIENT_ID | App Registration Client ID |" >> $GITHUB_STEP_SUMMARY
-          echo "| AZURE_TENANT_ID | Azure AD Tenant ID |" >> $GITHUB_STEP_SUMMARY
-          echo "| AZURE_SUBSCRIPTION_ID | Azure Subscription ID |" >> $GITHUB_STEP_SUMMARY
+          echo "| AZURE_TENANT_ID | Your Azure AD tenant ID (same for all envs) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Environments created" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Type |" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Environment-level variables" >> $GITHUB_STEP_SUMMARY
+          echo "Update each at: **Settings > Environments > [env] > Variables**" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | AZURE_CLIENT_ID | AZURE_SUBSCRIPTION_ID |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| dev-plan | App Reg for dev | Dev subscription |" >> $GITHUB_STEP_SUMMARY
+          echo "| dev | App Reg for dev | Dev subscription |" >> $GITHUB_STEP_SUMMARY
+          echo "| test-plan | App Reg for test | Test subscription |" >> $GITHUB_STEP_SUMMARY
+          echo "| test | App Reg for test | Test subscription |" >> $GITHUB_STEP_SUMMARY
+          echo "| prod-plan | App Reg for prod | Prod subscription |" >> $GITHUB_STEP_SUMMARY
+          echo "| prod | App Reg for prod | Prod subscription |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Federated credentials to create in Azure Portal" >> $GITHUB_STEP_SUMMARY
+          echo "Add these subjects on each App Registration:" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Federated credential subject |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| dev-plan | Unprotected (OIDC / no approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "| dev | Protected (requires reviewer approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "| test-plan | Unprotected (OIDC / no approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "| test | Protected (requires reviewer approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "| prod-plan | Unprotected (OIDC / no approval) |" >> $GITHUB_STEP_SUMMARY
-          echo "| prod | Protected (requires reviewer approval) |" >> $GITHUB_STEP_SUMMARY
+          echo "| dev-plan | \`repo:${{ github.repository }}:environment:dev-plan\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| dev | \`repo:${{ github.repository }}:environment:dev\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| test-plan | \`repo:${{ github.repository }}:environment:test-plan\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| test | \`repo:${{ github.repository }}:environment:test\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| prod-plan | \`repo:${{ github.repository }}:environment:prod-plan\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| prod | \`repo:${{ github.repository }}:environment:prod\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
           echo "### Remaining steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Fill in the 3 Azure variables above" >> $GITHUB_STEP_SUMMARY
-          echo "2. Add BLACKDUCK_API_TOKEN and SONARQUBE_TOKEN secrets if not already org secrets" >> $GITHUB_STEP_SUMMARY
-          echo "3. Fill in the TODO items in .github/workflows/dotnet-ci-cd.yml or angular-ci-cd.yml" >> $GITHUB_STEP_SUMMARY
+          echo "1. Fill in all REPLACE_ME values above" >> $GITHUB_STEP_SUMMARY
+          echo "2. Add federated credentials in Azure Portal for each environment" >> $GITHUB_STEP_SUMMARY
+          echo "3. Confirm BLACKDUCK_API_TOKEN and SONARQUBE_TOKEN exist as org secrets" >> $GITHUB_STEP_SUMMARY
+          echo "4. Fill in the TODO items in .github/workflows/dotnet-ci-cd.yml or angular-ci-cd.yml" >> $GITHUB_STEP_SUMMARY
