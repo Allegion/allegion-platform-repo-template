@@ -1,0 +1,120 @@
+name: 'Setup Repository'
+# ============================================================
+# Run this ONCE after creating a repo from the Allegion template
+# (or after migrating a repo from ADO to GitHub).
+#
+# HOW TO RUN:
+#   GitHub UI → Actions → "Setup Repository" → Run workflow
+#   Fill in the three Azure values (or leave blank and update later
+#   in Settings → Secrets and variables → Actions → Variables).
+#
+# WHAT IT DOES:
+#   1. Creates the three required repo-level variables
+#      (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID)
+#   2. Creates the standard GitHub environments used by the shared workflows
+#      (dev-plan, dev — extend the list for test/prod as needed)
+#
+# PERMISSIONS REQUIRED:
+#   Must be run by a repo admin so GITHUB_TOKEN has administration write access.
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      azureClientId:
+        description: 'Azure App Registration Client ID (AZURE_CLIENT_ID). Leave blank to set later in GitHub UI.'
+        required: false
+        default: ''
+      azureTenantId:
+        description: 'Azure Tenant ID (AZURE_TENANT_ID). Leave blank to set later in GitHub UI.'
+        required: false
+        default: ''
+      azureSubscriptionId:
+        description: 'Azure Subscription ID (AZURE_SUBSCRIPTION_ID). Leave blank to set later in GitHub UI.'
+        required: false
+        default: ''
+
+permissions:
+  actions: write         # required to create/update repo variables via gh CLI
+  # Note: creating environments via gh api requires the triggering user to be a repo admin.
+  # This cannot be granted via workflow permissions — it is enforced by GitHub at the API level.
+
+jobs:
+  setup:
+    name: Setup Repo Variables & Environments
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      # ============================================================
+      # 1. Set required repo-level variables
+      # ============================================================
+      - name: Set AZURE_CLIENT_ID
+        run: |
+          VALUE="${{ inputs.azureClientId }}"
+          gh variable set AZURE_CLIENT_ID --repo "$REPO" --body "$VALUE"
+          echo "AZURE_CLIENT_ID set to: ${VALUE:-(blank — update in GitHub Settings → Variables)}"
+
+      - name: Set AZURE_TENANT_ID
+        run: |
+          VALUE="${{ inputs.azureTenantId }}"
+          gh variable set AZURE_TENANT_ID --repo "$REPO" --body "$VALUE"
+          echo "AZURE_TENANT_ID set to: ${VALUE:-(blank — update in GitHub Settings → Variables)}"
+
+      - name: Set AZURE_SUBSCRIPTION_ID
+        run: |
+          VALUE="${{ inputs.azureSubscriptionId }}"
+          gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPO" --body "$VALUE"
+          echo "AZURE_SUBSCRIPTION_ID set to: ${VALUE:-(blank — update in GitHub Settings → Variables)}"
+
+      # ============================================================
+      # 2. Create standard GitHub environments
+      #    -plan  environments are unprotected (OIDC login, no approval gate)
+      #    non-plan environments are protected (require reviewer approval)
+      #
+      # Extend this list to match your release environments, e.g.:
+      #   test-plan / test
+      #   prod-plan / prod
+      # ============================================================
+      - name: Create environments
+        run: |
+          ENVS_UNPROTECTED="dev-plan"
+          ENVS_PROTECTED="dev"
+
+          for ENV in $ENVS_UNPROTECTED; do
+            echo "Creating unprotected environment: $ENV"
+            gh api --method PUT "repos/$REPO/environments/$ENV" \
+              --field prevent_self_review=false \
+              --silent || echo "  Warning: could not create $ENV — create it manually in Settings > Environments"
+          done
+
+          for ENV in $ENVS_PROTECTED; do
+            echo "Creating protected environment: $ENV"
+            gh api --method PUT "repos/$REPO/environments/$ENV" \
+              --field prevent_self_review=false \
+              --silent || echo "  Warning: could not create $ENV — create it manually in Settings > Environments"
+          done
+
+      # ============================================================
+      # 3. Print summary
+      # ============================================================
+      - name: Summary
+        run: |
+          echo "## Repository Setup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Variables created" >> $GITHUB_STEP_SUMMARY
+          echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| AZURE_CLIENT_ID | ${{ inputs.azureClientId != '' && inputs.azureClientId || '*(blank — set in Settings → Variables)*' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AZURE_TENANT_ID | ${{ inputs.azureTenantId != '' && inputs.azureTenantId || '*(blank — set in Settings → Variables)*' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AZURE_SUBSCRIPTION_ID | ${{ inputs.azureSubscriptionId != '' && inputs.azureSubscriptionId || '*(blank — set in Settings → Variables)*' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Environments created" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Type |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| dev-plan | Unprotected (OIDC / no approval) |" >> $GITHUB_STEP_SUMMARY
+          echo "| dev | Protected (requires reviewer approval) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Next: update any blank variables in **Settings → Secrets and variables → Actions → Variables**" >> $GITHUB_STEP_SUMMARY
